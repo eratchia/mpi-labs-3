@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <iomanip>
 #include <vector>
+#include <tuple>
 #include "laplace-common.h"
 
 #define OPTION_VERBOSE "--verbose"

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <tuple>
 #include <sys/time.h>
 #include <mpi.h>
 #include "laplace-common.h"
@@ -73,7 +74,7 @@ static std::tuple<int, double> performAlgorithm(
     int startRowIncl = frag->firstRowIdxIncl + (myRank == 0 ? 1 : 0);
     int endRowExcl = frag->lastRowIdxExcl - (myRank == numProcesses - 1 ? 1 : 0);
 
-    double maxDiff = 0;
+    double maxDiff = 0, diffSwap;
     int numIterations = 0;
 
     MPI_Request hole;
@@ -83,14 +84,13 @@ static std::tuple<int, double> performAlgorithm(
 
     for(int color = 0; color < 2; ++color) {
         if (myRank > 0) {
-            MPI_Isend(
+            MPI_Send(
                 frag->data[color][1], 
                 frag->getNumColorPointsInRow(startRowIncl, color), 
                 MPI_DOUBLE, 
                 myRank - 1, 
                 0 + color, 
-                MPI_COMM_WORLD, 
-                &hole);
+                MPI_COMM_WORLD);
             MPI_Irecv(
                 frag->data[color][0], 
                 frag->getNumColorPointsInRow(startRowIncl - 1, color), 
@@ -101,14 +101,13 @@ static std::tuple<int, double> performAlgorithm(
                 &received[2 + color]);
         }
         if (myRank < numProcesses - 1) {
-            MPI_Isend(
+            MPI_Send(
                 frag->data[color][endRowExcl - frag->firstRowIdxIncl], 
                 frag->getNumColorPointsInRow(endRowExcl - 1, color), 
                 MPI_DOUBLE, 
                 myRank + 1, 
                 2 + color, 
-                MPI_COMM_WORLD, 
-                &hole);
+                MPI_COMM_WORLD);
             MPI_Irecv(
                 frag->data[color][endRowExcl - frag->firstRowIdxIncl + 1], 
                 frag->getNumColorPointsInRow(endRowExcl, color), 
@@ -127,8 +126,12 @@ static std::tuple<int, double> performAlgorithm(
     do {
         maxDiff = 0.0;
         for (int color = 0; color < 2; ++color) {
-            MPI_Wait(&received[0 + color], &status);
-            MPI_Wait(&received[2 + color], &status);
+            if (myRank < numProcesses - 1) {
+                MPI_Wait(&received[0 + color], &status);
+            }
+            if (myRank > 0) {
+                MPI_Wait(&received[2 + color], &status);
+            }
             for (int rowIdx = startRowIncl; rowIdx < endRowExcl; ++rowIdx) {
                 for (int colIdx = 1 + (rowIdx % 2 == color ? 1 : 0); 
                      colIdx < frag->gridDimension - 1; 
@@ -149,34 +152,49 @@ static std::tuple<int, double> performAlgorithm(
                 }
             }
             if (myRank > 0) {
-                MPI_Isend(
+                MPI_Send(
                     frag->data[color][1], 
                     frag->getNumColorPointsInRow(startRowIncl, color), 
                     MPI_DOUBLE, 
                     myRank - 1, 
                     0 + color, 
+                    MPI_COMM_WORLD);
+                MPI_Irecv(
+                    frag->data[color][0], 
+                    frag->getNumColorPointsInRow(startRowIncl - 1, color), 
+                    MPI_DOUBLE, 
+                    myRank - 1, 
+                    2 + color, 
                     MPI_COMM_WORLD, 
-                    &hole);
+                    &received[2 + color]);
             }
             if (myRank < numProcesses - 1) {
-                MPI_Isend(
+                MPI_Send(
                     frag->data[color][endRowExcl - frag->firstRowIdxIncl], 
-                    frag->getNumColorPointsInRow(startRowIncl, color), 
+                    frag->getNumColorPointsInRow(endRowExcl - 1, color), 
                     MPI_DOUBLE, 
                     myRank + 1, 
                     2 + color, 
+                    MPI_COMM_WORLD);
+                MPI_Irecv(
+                    frag->data[color][endRowExcl - frag->firstRowIdxIncl + 1], 
+                    frag->getNumColorPointsInRow(endRowExcl, color), 
+                    MPI_DOUBLE, 
+                    myRank + 1, 
+                    0 + color, 
                     MPI_COMM_WORLD, 
-                    &hole);
+                    &received[0 + color]);
             }
         }
         // TODO: Gather diff
         MPI_Allreduce(
             &maxDiff, 
-            &maxDiff, 
+            &diffSwap, 
             1, 
             MPI_DOUBLE, 
             MPI_MAX, 
             MPI_COMM_WORLD);
+        maxDiff = diffSwap;
         ++numIterations;
     } while (maxDiff > epsilon);
     /* no code changes beyond this point should be needed */
@@ -193,6 +211,7 @@ int main(int argc, char *argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
     MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
 
+
     auto inputOptions = parseInput(argc, argv, numProcesses);
     if (inputOptions.getErrorCode() != 0) {
         return inputOptions.getErrorCode();
@@ -204,8 +223,10 @@ int main(int argc, char *argv[]) {
     double omega = Utils::getRelaxationFactor(numPointsPerDimension);
     double epsilon = Utils::getToleranceValue(numPointsPerDimension);
 
+
     auto gridFragment = new GridFragment(numPointsPerDimension, numProcesses, myRank);
     gridFragment->initialize();
+
 
     if (gettimeofday(&startTime, nullptr)) {
         gridFragment->free();
