@@ -91,14 +91,6 @@ static std::tuple<int, double> performAlgorithm(
                 myRank - 1, 
                 0 + color, 
                 MPI_COMM_WORLD);
-            MPI_Irecv(
-                frag->data[color][0], 
-                frag->getNumColorPointsInRow(startRowIncl - 1, color), 
-                MPI_DOUBLE, 
-                myRank - 1, 
-                2 + color, 
-                MPI_COMM_WORLD, 
-                &received[2 + color]);
         }
         if (myRank < numProcesses - 1) {
             MPI_Send(
@@ -108,14 +100,6 @@ static std::tuple<int, double> performAlgorithm(
                 myRank + 1, 
                 2 + color, 
                 MPI_COMM_WORLD);
-            MPI_Irecv(
-                frag->data[color][endRowExcl - frag->firstRowIdxIncl + 1], 
-                frag->getNumColorPointsInRow(endRowExcl, color), 
-                MPI_DOUBLE, 
-                myRank + 1, 
-                0 + color, 
-                MPI_COMM_WORLD, 
-                &received[0 + color]);
         }
     }
     /* TODO: change the following code fragment */
@@ -126,11 +110,25 @@ static std::tuple<int, double> performAlgorithm(
     do {
         maxDiff = 0.0;
         for (int color = 0; color < 2; ++color) {
-            if (myRank < numProcesses - 1) {
-                MPI_Wait(&received[0 + 1 - color], &status);
-            }
             if (myRank > 0) {
-                MPI_Wait(&received[2 + 1 - color], &status);
+                MPI_Recv(
+                    frag->data[1 - color][0], 
+                    frag->getNumColorPointsInRow(startRowIncl - 1, 1 - color), 
+                    MPI_DOUBLE, 
+                    myRank - 1, 
+                    2 + 1 - color, 
+                    MPI_COMM_WORLD,
+                    &status);
+            }
+            if (myRank < numProcesses - 1) {
+                MPI_Recv(
+                    frag->data[1 - color][endRowExcl - frag->firstRowIdxIncl + 1], 
+                    frag->getNumColorPointsInRow(endRowExcl, 1 - color), 
+                    MPI_DOUBLE, 
+                    myRank + 1, 
+                    0 + 1 - color, 
+                    MPI_COMM_WORLD, 
+                    &status);
             }
             for (int rowIdx = startRowIncl; rowIdx < endRowExcl; ++rowIdx) {
                 for (int colIdx = 1 + (rowIdx % 2 == color ? 1 : 0); 
@@ -159,14 +157,6 @@ static std::tuple<int, double> performAlgorithm(
                     myRank - 1, 
                     0 + color, 
                     MPI_COMM_WORLD);
-                MPI_Irecv(
-                    frag->data[color][0], 
-                    frag->getNumColorPointsInRow(startRowIncl - 1, color), 
-                    MPI_DOUBLE, 
-                    myRank - 1, 
-                    2 + color, 
-                    MPI_COMM_WORLD, 
-                    &received[2 + color]);
             }
             if (myRank < numProcesses - 1) {
                 MPI_Send(
@@ -176,14 +166,6 @@ static std::tuple<int, double> performAlgorithm(
                     myRank + 1, 
                     2 + color, 
                     MPI_COMM_WORLD);
-                MPI_Irecv(
-                    frag->data[color][endRowExcl - frag->firstRowIdxIncl + 1], 
-                    frag->getNumColorPointsInRow(endRowExcl, color), 
-                    MPI_DOUBLE, 
-                    myRank + 1, 
-                    0 + color, 
-                    MPI_COMM_WORLD, 
-                    &received[0 + color]);
             }
         }
         // TODO: Gather diff
